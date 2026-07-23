@@ -2,13 +2,13 @@ name: Coolify Auto-Update Check
 on:
   schedule:
     - cron: '0 * * * *' # Chạy tự động mỗi giờ một lần
-  workflow_dispatch:      # Cho phép bạn bấm nút chạy thủ công bất cứ lúc nào
+  workflow_dispatch:      # Cho phép bấm nút chạy thủ công bất cứ lúc nào
 
 jobs:
   check-updates:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Cần quyền này để commit file apps_state.json.enc ngược lại repo
+      contents: write # Quyền commit file apps_state.json.enc ngược lại repo
 
     steps:
       - name: Checkout Tool Repo
@@ -30,12 +30,7 @@ jobs:
           COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
           MY_CONFIG_PAT: ${{ secrets.MY_CONFIG_PAT }}
           CONFIG_URL: ${{ secrets.CONFIG_URL }}
-          NTFY_URL: ${{ secrets.NTFY_URL }}        # 👈 URL của Ntfy (ví dụ: https://ntfy.sh/topic_secret_cua_ban)
-          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}    # (Tùy chọn) Thêm nếu ntfy server yêu cầu Token
         run: |
-          echo "::add-mask::$NTFY_URL"
-          [ -n "$NTFY_TOKEN" ] && echo "::add-mask::$NTFY_TOKEN"
-
           # Chạy script xử lý chính
           bash check_and_deploy.sh
 
@@ -45,7 +40,7 @@ jobs:
           git config --local user.name "GitHub Action"
           
           # Chỉ làm việc với file đã mã hóa (.enc)
-          # Xóa file thô apps_state.json nếu nó lỡ xuất hiện để đảm bảo an toàn
+          # Xóa file thô apps_state.json nếu lỡ xuất hiện để đảm bảo an toàn
           [ -f "apps_state.json" ] && rm -f apps_state.json
           
           # Kiểm tra xem file mã hóa có thay đổi nội dung không
