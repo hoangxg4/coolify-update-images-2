@@ -30,8 +30,12 @@ jobs:
           COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
           MY_CONFIG_PAT: ${{ secrets.MY_CONFIG_PAT }}
           CONFIG_URL: ${{ secrets.CONFIG_URL }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          NTFY_URL: ${{ secrets.NTFY_URL }}        # 👈 URL của Ntfy (ví dụ: https://ntfy.sh/topic_secret_cua_ban)
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}    # (Tùy chọn) Thêm nếu ntfy server yêu cầu Token
         run: |
+          echo "::add-mask::$NTFY_URL"
+          [ -n "$NTFY_TOKEN" ] && echo "::add-mask::$NTFY_TOKEN"
+
           # Chạy script xử lý chính
           bash check_and_deploy.sh
 
