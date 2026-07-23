@@ -7,8 +7,10 @@ TEMP_CONFIG="remote_registries.json"
 
 echo "::add-mask::$COOLIFY_URL"
 echo "::add-mask::$COOLIFY_TOKEN"
+[ -n "$NTFY_URL" ] && echo "::add-mask::$NTFY_URL"
+[ -n "$NTFY_TOKEN" ] && echo "::add-mask::$NTFY_TOKEN"
 
-# --- Hàm gửi thông báo ntfy ---
+# --- Hàm gửi thông báo ntfy (Có tích hợp Debug) ---
 send_ntfy_notification() {
   local uuid=$1; local name=$2; local image=$3; local tag=$4; local fqdn=$5
   local p_uuid=$6; local e_uuid=$7
@@ -16,35 +18,55 @@ send_ntfy_notification() {
 
   local dashboard_link="${COOLIFY_URL}/project/${p_uuid}/environment/${e_uuid}/application/${uuid}"
 
-  if [ -n "$NTFY_URL" ]; then
-    # Chuẩn bị nội dung tin nhắn (Markdown)
-    local body="Image: $image:$tag\nTime: $time"
-    if [[ -n "$fqdn" && "$fqdn" != "null" ]]; then
-      body="$body\nLive URL: $fqdn"
-    fi
+  # 1. Kiểm tra xem NTFY_URL có tồn tại không
+  if [ -z "$NTFY_URL" ]; then
+    echo "   ❌ [NTFY DEBUG] Lỗi: Biến môi trường NTFY_URL bị RỖNG! Hãy kiểm tra GitHub Secrets."
+    return
+  fi
 
-    # Tạo các header tùy chỉnh cho ntfy
-    local headers=(
-      -H "Title: 🚀 New Update Deployed: $name"
-      -H "Tags: rocket,coolify,package"
-      -H "Click: $dashboard_link"
-      -H "Markdown: yes"
-    )
+  echo "   🔍 [NTFY DEBUG] Đang kết nối tới: $NTFY_URL"
 
-    # Thêm Action button nếu app có FQDN (URL truy cập)
-    if [[ -n "$fqdn" && "$fqdn" != "null" ]]; then
-      headers+=(-H "Actions: view, Visit Site, $fqdn; view, Open Dashboard, $dashboard_link")
-    else
-      headers+=(-H "Actions: view, Open Dashboard, $dashboard_link")
-    fi
+  # Chuẩn bị nội dung tin nhắn
+  local body="Image: $image:$tag\nTime: $time"
+  if [[ -n "$fqdn" && "$fqdn" != "null" ]]; then
+    body="$body\nLive URL: $fqdn"
+  fi
 
-    # Thêm Auth Token nếu có cấu hình NTFY_TOKEN
-    if [ -n "$NTFY_TOKEN" ]; then
-      headers+=(-H "Authorization: Bearer $NTFY_TOKEN")
-    fi
+  # Chuẩn bị danh sách Headers
+  local headers=(
+    -H "Title: 🚀 New Update Deployed: $name"
+    -H "Tags: rocket,coolify,package"
+    -H "Click: $dashboard_link"
+    -H "Markdown: yes"
+  )
 
-    # Gửi request tới ntfy
-    curl -s "${headers[@]}" -d "$body" "$NTFY_URL" > /dev/null
+  # Thêm các nút bấm hành động (Actions)
+  if [[ -n "$fqdn" && "$fqdn" != "null" ]]; then
+    headers+=(-H "Actions: view, Visit Site, $fqdn; view, Open Dashboard, $dashboard_link")
+  else
+    headers+=(-H "Actions: view, Open Dashboard, $dashboard_link")
+  fi
+
+  # Thêm Auth Token nếu server yêu cầu đăng nhập
+  if [ -n "$NTFY_TOKEN" ]; then
+    headers+=(-H "Authorization: Bearer $NTFY_TOKEN")
+  fi
+
+  # 2. Thực thi lệnh curl và ghi lại HTTP Status Code + Response Body
+  local response
+  response=$(curl -s -w "\n%{http_code}" "${headers[@]}" -d "$body" "$NTFY_URL" 2>&1)
+
+  local http_code
+  http_code=$(echo "$response" | tail -n1)
+  local res_body
+  res_body=$(echo "$response" | sed '$d')
+
+  # 3. Phân tích kết quả trả về
+  if [ "$http_code" -eq 200 ]; then
+    echo "   ✅ [NTFY DEBUG] Gửi thông báo ntfy thành công (HTTP status 200)!"
+  else
+    echo "   ❌ [NTFY DEBUG] Gửi ntfy thất bại! Mã HTTP: $http_code"
+    echo "   📄 [NTFY DEBUG] Phản hồi từ Ntfy Server: $res_body"
   fi
 }
 
@@ -76,7 +98,7 @@ echo "[]" > "$MAP_FILE"
 
 PROJECTS_RES=$(curl -s -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_URL/api/v1/projects")
 
-# Kiểm tra xem API có lỗi không (phản hồi có phải là mảng JSON không)
+# Kiểm tra xem API có lỗi không
 if ! printf "%s" "$PROJECTS_RES" | jq -e 'type == "array"' >/dev/null 2>&1; then
     echo "❌ Lỗi: Không thể lấy danh sách Projects. Phản hồi từ Server:"
     printf "%s\n" "$PROJECTS_RES"
@@ -127,7 +149,7 @@ printf "%s" "$APPS_RES" | jq -c '.[]' | while read -r app; do
                 if [ "$status" == "200" ]; then
                     tmp=$(mktemp); jq ".[\"$uuid\"] = \"$remote_digest\"" "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
                     send_ntfy_notification "$uuid" "$name" "$image" "$tag" "$fqdn" "$p_uuid" "$e_uuid"
-                    echo "   ✅ Success!"
+                    echo "   ✅ Deploy trigger successfully!"
                 else
                     echo "   ❌ Deploy failed with HTTP status: $status"
                 fi
