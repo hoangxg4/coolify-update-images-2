@@ -36,7 +36,7 @@ echo "[]" > "$MAP_FILE"
 
 PROJECTS_RES=$(curl -s -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_URL/api/v1/projects")
 
-# Kiểm tra xem API có lỗi không
+# Kiểm tra xem API có lỗi không (phản hồi có phải là mảng JSON không)
 if ! printf "%s" "$PROJECTS_RES" | jq -e 'type == "array"' >/dev/null 2>&1; then
     echo "❌ Lỗi: Không thể lấy danh sách Projects. Phản hồi từ Server:"
     printf "%s\n" "$PROJECTS_RES"
@@ -81,7 +81,7 @@ printf "%s" "$APPS_RES" | jq -c '.[]' | while read -r app; do
                 
                 if [ "$status" == "200" ]; then
                     tmp=$(mktemp); jq ".[\"$uuid\"] = \"$remote_digest\"" "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
-                    echo "   ✅ Deploy triggered successfully!"
+                    echo "   ✅ Success!"
                 else
                     echo "   ❌ Deploy failed with HTTP status: $status"
                 fi
