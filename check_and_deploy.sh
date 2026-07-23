@@ -8,35 +8,43 @@ TEMP_CONFIG="remote_registries.json"
 echo "::add-mask::$COOLIFY_URL"
 echo "::add-mask::$COOLIFY_TOKEN"
 
-# --- Hàm gửi thông báo Discord ---
-send_discord_notification() {
+# --- Hàm gửi thông báo ntfy ---
+send_ntfy_notification() {
   local uuid=$1; local name=$2; local image=$3; local tag=$4; local fqdn=$5
   local p_uuid=$6; local e_uuid=$7
   local time=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-  
-  local dashboard_link="${COOLIFY_URL}/project/${p_uuid}/environment/${e_uuid}/application/${uuid}"
-  local fqdn_link="N/A"
-  [[ -n "$fqdn" && "$fqdn" != "null" ]] && fqdn_link="🌐 [Visit Site]($fqdn)"
 
-  if [ -n "$DISCORD_WEBHOOK" ]; then
-    local payload=$(cat <<EOF
-{
-  "embeds": [{
-    "title": "🚀 New Update Deployed: $name",
-    "url": "$dashboard_link",
-    "color": 3066993,
-    "fields": [
-      { "name": "🌍 Live URL", "value": "$fqdn_link", "inline": true },
-      { "name": "🏷️ Tag", "value": "\`${tag}\`", "inline": true },
-      { "name": "🖥️ Dashboard", "value": "[Open Full Dashboard]($dashboard_link)", "inline": false },
-      { "name": "📦 Image", "value": "\`${image}\`", "inline": false }
-    ],
-    "footer": { "text": "Coolify Auto Deploy • $time" }
-  }]
-}
-EOF
-)
-    curl -s -H "Content-Type: application/json" -X POST -d "$payload" "$DISCORD_WEBHOOK" > /dev/null
+  local dashboard_link="${COOLIFY_URL}/project/${p_uuid}/environment/${e_uuid}/application/${uuid}"
+
+  if [ -n "$NTFY_URL" ]; then
+    # Chuẩn bị nội dung tin nhắn (Markdown)
+    local body="Image: $image:$tag\nTime: $time"
+    if [[ -n "$fqdn" && "$fqdn" != "null" ]]; then
+      body="$body\nLive URL: $fqdn"
+    fi
+
+    # Tạo các header tùy chỉnh cho ntfy
+    local headers=(
+      -H "Title: 🚀 New Update Deployed: $name"
+      -H "Tags: rocket,coolify,package"
+      -H "Click: $dashboard_link"
+      -H "Markdown: yes"
+    )
+
+    # Thêm Action button nếu app có FQDN (URL truy cập)
+    if [[ -n "$fqdn" && "$fqdn" != "null" ]]; then
+      headers+=(-H "Actions: view, Visit Site, $fqdn; view, Open Dashboard, $dashboard_link")
+    else
+      headers+=(-H "Actions: view, Open Dashboard, $dashboard_link")
+    fi
+
+    # Thêm Auth Token nếu có cấu hình NTFY_TOKEN
+    if [ -n "$NTFY_TOKEN" ]; then
+      headers+=(-H "Authorization: Bearer $NTFY_TOKEN")
+    fi
+
+    # Gửi request tới ntfy
+    curl -s "${headers[@]}" -d "$body" "$NTFY_URL" > /dev/null
   fi
 }
 
@@ -118,7 +126,7 @@ printf "%s" "$APPS_RES" | jq -c '.[]' | while read -r app; do
                 
                 if [ "$status" == "200" ]; then
                     tmp=$(mktemp); jq ".[\"$uuid\"] = \"$remote_digest\"" "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
-                    send_discord_notification "$uuid" "$name" "$image" "$tag" "$fqdn" "$p_uuid" "$e_uuid"
+                    send_ntfy_notification "$uuid" "$name" "$image" "$tag" "$fqdn" "$p_uuid" "$e_uuid"
                     echo "   ✅ Success!"
                 else
                     echo "   ❌ Deploy failed with HTTP status: $status"
