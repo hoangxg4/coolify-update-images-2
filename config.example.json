@@ -16,5 +16,19 @@
       "user": "admin",
       "pass": "your_private_registry_password"
     }
-  ]
+  ],
+  "git": {
+    "enabled": true,
+    "mode": "commit",
+    "apps": [],
+    "tokens": {
+      "github.com": "ghp_xxx_token_cho_private_repo",
+      "gitlab.com": "glpat-xxx"
+    }
+  },
+  "compose": {
+    "enabled": true,
+    "filter_templates": true,
+    "services": []
+  }
 }
