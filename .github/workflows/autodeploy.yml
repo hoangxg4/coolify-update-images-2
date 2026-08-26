@@ -4,6 +4,12 @@ on:
     - cron: '0 * * * *' # Chạy tự động mỗi giờ một lần
   workflow_dispatch:      # Cho phép bấm nút chạy thủ công bất cứ lúc nào
 
+# Chạy tuần tự: nếu cron và chạy tay chồng nhau, run sau sẽ đợi
+# (tránh conflict khi push state và deploy trùng lặp)
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   check-updates:
     runs-on: ubuntu-latest
