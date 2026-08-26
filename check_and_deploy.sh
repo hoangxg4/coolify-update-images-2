@@ -45,6 +45,53 @@ deploy_resource() {
     return 1
 }
 
+# Hàm deploy riêng cho Compose Service: dùng endpoint /services/{uuid}/restart?latest=true
+# (tương đương nút "Pull Latest Images & Restart" trên UI).
+# Lý do: POST /api/v1/deploy với Service KHÔNG pull image mới (StartService::run thiếu
+# pullLatestImages=true) -> service chỉ bị restart với image cache cũ.
+# Fallback về /deploy nếu server Coolify cũ chưa có endpoint này (404/405).
+deploy_service() {
+    local uuid="$1"
+    local display_name="$2"
+    local tmpfile
+    tmpfile=$(mktemp)
+    local status
+
+    status=$(curl -sS --max-time 120 -o "$tmpfile" -w "%{http_code}" -X POST \
+        -H "Authorization: Bearer $COOLIFY_TOKEN" \
+        "$COOLIFY_URL/api/v1/services/$uuid/restart?latest=true" || true)
+
+    if [ "$status" == "404" ] || [ "$status" == "405" ]; then
+        echo "   ⚠️ Endpoint /services/$uuid/restart not available (HTTP $status), falling back to /deploy..."
+        rm -f "$tmpfile"
+        deploy_resource "$uuid" "$display_name"
+        return $?
+    fi
+
+    if [ "$status" == "200" ]; then
+        rm -f "$tmpfile"
+        return 0
+    fi
+
+    if [ "$status" == "429" ]; then
+        echo "   ⏳ Rate limited (HTTP 429), waiting 60s and retrying once..."
+        sleep 60
+        status=$(curl -sS --max-time 120 -o "$tmpfile" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            "$COOLIFY_URL/api/v1/services/$uuid/restart?latest=true" || true)
+        if [ "$status" == "200" ]; then
+            rm -f "$tmpfile"
+            return 0
+        fi
+    fi
+
+    echo "   ❌ Deploy failed for $display_name with HTTP status: $status"
+    echo "   Response body:"
+    cat "$tmpfile" 2>/dev/null || true
+    rm -f "$tmpfile"
+    return 1
+}
+
 # 1. Tải config và giải mã state
 if [ -n "${CONFIG_URL:-}" ] && [ -n "${MY_CONFIG_PAT:-}" ]; then
     curl -sS -L --max-time 120 -o "$TEMP_CONFIG" -H "Authorization: token $MY_CONFIG_PAT" "$CONFIG_URL" || true
@@ -52,8 +99,9 @@ if [ -n "${CONFIG_URL:-}" ] && [ -n "${MY_CONFIG_PAT:-}" ]; then
 fi
 if [ -f "${CONFIG_FILE:-}" ]; then
     STATE_PWD=$(jq -r '.state_pass // empty' "$CONFIG_FILE" 2>/dev/null || true)
+    export STATE_PWD # dùng -pass env: thay vì -k để mật khẩu không xuất hiện trong process list
     if [ -f "$STATE_FILE_ENC" ] && [ -n "$STATE_PWD" ]; then
-        openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in "$STATE_FILE_ENC" -out "$STATE_FILE" -k "$STATE_PWD" 2>/dev/null || true
+        openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in "$STATE_FILE_ENC" -out "$STATE_FILE" -pass env:STATE_PWD 2>/dev/null || true
     fi
 fi
 [ ! -f "$STATE_FILE" ] && echo "{}" > "$STATE_FILE"
@@ -234,9 +282,11 @@ if [ "$COMPOSE_ENABLED" == "true" ]; then
 
         if [ "$changed" == "true" ]; then
             echo "🚀 Deploying compose service $svc_name ($svc_uuid)..."
-            if deploy_resource "$svc_uuid" "$svc_name"; then
+            if deploy_service "$svc_uuid" "$svc_name"; then
                 tmp=$(mktemp)
-                jq --arg s "$svc_uuid" '.[$s] = {}' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+                # Chỉ merge digest đã resolve, GIỮ nguyên digest cũ của image
+                # chưa resolve được trong lần chạy này (tránh mất mốc so sánh)
+                jq --arg s "$svc_uuid" '.[$s] //= {}' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
                 for img in "${!current_digests[@]}"; do
                     tmp=$(mktemp)
                     jq --arg s "$svc_uuid" --arg i "$img" --arg d "${current_digests[$img]}" '.[$s][$i] = $d' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
@@ -249,7 +299,7 @@ fi
 
 # 4. Mã hóa lại & Dọn dẹp
 if [ -n "${STATE_PWD:-}" ]; then
-    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in "$STATE_FILE" -out "$STATE_FILE_ENC" -k "$STATE_PWD"
+    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in "$STATE_FILE" -out "$STATE_FILE_ENC" -pass env:STATE_PWD
     rm -f "$STATE_FILE"
 fi
 rm -f "$TEMP_CONFIG"
